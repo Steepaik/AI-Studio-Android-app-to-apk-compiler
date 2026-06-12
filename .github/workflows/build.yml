@@ -2,7 +2,7 @@ name: Mobile Cloud Build
 
 on: 
   push:
-  workflow_dispatch: # Allows you to trigger it manually
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,15 +17,37 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Grant Execute Permission to Gradle
-        run: chmod +x gradlew
+      # This installs a fallback version of Gradle if the wrapper is missing
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
-      - name: Run Gradle Build
-        run: ./gradlew assembleDebug
+      - name: Locate Project and Run Gradle Build
+        run: |
+          # 1. Automatically find the directory containing the build.gradle file
+          TARGET_DIR=$(find . -name "build.gradle" -o -name "build.gradle.kts" | head -n 1 | xargs dirname)
+          
+          if [ -z "$TARGET_DIR" ]; then
+            echo "Error: Could not find a build.gradle file anywhere in this repository!"
+            exit 1
+          fi
+          
+          echo "Target project directory found at: $TARGET_DIR"
+          cd "$TARGET_DIR"
+          
+          # 2. Check if gradlew exists; if not, generate it dynamically
+          if [ -f "gradlew" ]; then
+            echo "Gradle wrapper exists. Granting permissions..."
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          else
+            echo "Gradle wrapper is missing! Generating a new one..."
+            gradle wrapper
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          fi
 
       - name: Upload Compiled APK
         uses: actions/upload-artifact@v4
         with:
           name: my-compiled-apk
           path: "**/build/outputs/apk/debug/*.apk"
-          
