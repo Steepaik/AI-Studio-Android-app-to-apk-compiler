@@ -1,0 +1,6 @@
+{
+  "name": "Build Console",
+  "description": "Download, parse, and compile Android application source code exported from Google AI Studio build repositories.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

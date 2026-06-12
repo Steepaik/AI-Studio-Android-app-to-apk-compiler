@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Outer Terminal Window Frame -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M26,24h56c3.3,0 6,2.7 6,6v48c0,3.3 -2.7,6 -6,6H26c-3.3,0 -6,-2.7 -6,-6V30C20,26.7 22.7,24 26,24z" />
+        
+    <!-- Dark Inner Terminal Screen -->
+    <path
+        android:fillColor="#1E1E1E"
+        android:pathData="M24,32h60v44H24z" />
+        
+    <!-- Header Window Dots -->
+    <path
+        android:fillColor="#FF5F56"
+        android:pathData="M27,28m-2,0a2,2 0 1,0 4,0a2,2 0 1,0 -4,0" />
+    <path
+        android:fillColor="#FFBD2E"
+        android:pathData="M33,28m-2,0a2,2 0 1,0 4,0a2,2 0 1,0 -4,0" />
+    <path
+        android:fillColor="#27C93F"
+        android:pathData="M39,28m-2,0a2,2 0 1,0 4,0a2,2 0 1,0 -4,0" />
+        
+    <!-- Code Brackets & Compile Gear Symbol </ > inside screen -->
+    <path
+        android:strokeColor="#66BB6A"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M36,44l-8,8l8,8" />
+    <path
+        android:strokeColor="#29B6F6"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M48,60l4,-16" />
+    <path
+        android:strokeColor="#66BB6A"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M60,44l8,8l-8,8" />
+        
+    <!-- Compilation Status indicator bar inside terminal -->
+    <path
+        android:strokeColor="#FFCA28"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M28,68h40" />
+    <path
+        android:strokeColor="#757575"
+        android:strokeWidth="3"
+        android:strokeLineCap="round"
+        android:pathData="M72,68h8" />
+</vector>

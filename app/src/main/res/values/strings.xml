@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Build Console</string>
+    <string name="enter_repo_url">GitHub Repository URL or ZIP link</string>
+    <string name="compile_btn">Compile Source</string>
+    <string name="select_zip_btn">Choose Local ZIP</string>
+    <string name="realtime_logs">Compiler Console Logs</string>
+    <string name="build_progress">Compilation Engine State</string>
+</resources>
