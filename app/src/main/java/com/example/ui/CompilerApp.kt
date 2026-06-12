@@ -8,6 +8,8 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -97,6 +99,32 @@ fun CompilerApp(
             }
             viewModel.setLocalZip(uri, fileName)
             Toast.makeText(context, "Loaded zip: $fileName", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    var apkFileToExport by remember { mutableStateOf<File?>(null) }
+
+    val exportApkLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/vnd.android.package-archive")
+    ) { uri ->
+        val sourceFile = apkFileToExport
+        if (uri != null && sourceFile != null) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                        sourceFile.inputStream().use { inputStream ->
+                            inputStream.copyTo(outputStream)
+                        }
+                    }
+                    scope.launch(Dispatchers.Main) {
+                        Toast.makeText(context, "APK successfully exported to local storage!", Toast.LENGTH_LONG).show()
+                    }
+                } catch (e: Exception) {
+                    scope.launch(Dispatchers.Main) {
+                        Toast.makeText(context, "Export failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
         }
     }
 
@@ -243,6 +271,33 @@ fun CompilerApp(
                                 .padding(bottom = 12.dp)
                                 .testTag("github_url_input")
                         )
+
+                        // Dolphin DSU Remote quick suggestion link
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Quick Link: ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "Dolphin DSU Remote",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .clickable {
+                                        viewModel.setInputUrl("https://github.com/Steepaik/ai-studio-Dolphin-DSU-remote")
+                                        viewModel.clearLocalZip()
+                                        Toast.makeText(context, "Dolphin DSU link pasted!", Toast.LENGTH_SHORT).show()
+                                    }
+                                    .padding(vertical = 4.dp, horizontal = 4.dp)
+                            )
+                        }
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -462,7 +517,12 @@ fun CompilerApp(
                 ActiveCompileScreen(
                     buildStep = buildStep,
                     logLines = logStream,
-                    onCancel = { viewModel.cancelOrResetBuild() }
+                    onCancel = { viewModel.cancelOrResetBuild() },
+                    onExportApk = { file ->
+                        apkFileToExport = file
+                        val appNameClean = (buildStep as? BuildStep.Success)?.stats?.appName ?: "applet"
+                        exportApkLauncher.launch("${appNameClean.replace(" ", "_").lowercase()}_compiled.apk")
+                    }
                 )
             }
 
@@ -471,7 +531,11 @@ fun CompilerApp(
                 BuildHistoryDetailsOverlay(
                     build = activeBuildDetail!!,
                     onClose = { viewModel.closeBuildDetails() },
-                    onShareApk = { apkPath -> shareApk(context, apkPath) }
+                    onShareApk = { apkPath -> shareApk(context, apkPath) },
+                    onExportApk = { apkPath ->
+                        apkFileToExport = File(apkPath)
+                        exportApkLauncher.launch("${activeBuildDetail!!.appName.replace(" ", "_").lowercase()}_compiled.apk")
+                    }
                 )
             }
         }
@@ -628,7 +692,8 @@ fun BuildRecordRow(
 fun ActiveCompileScreen(
     buildStep: BuildStep,
     logLines: List<LogLine>,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onExportApk: (File) -> Unit
 ) {
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -908,32 +973,54 @@ fun ActiveCompileScreen(
                     }
                 }
 
-                Button(
-                    onClick = {
-                        val file = buildStep.apkFile
-                        val authority = "${context.packageName}.fileprovider"
-                        try {
-                            val uri = FileProvider.getUriForFile(context, authority, file)
-                            val intent = Intent(Intent.ACTION_SEND).apply {
-                                type = "application/vnd.android.package-archive"
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(Intent.createChooser(intent, "Install / Run Applet APK"))
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Installer: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .testTag("install_compiled_apk_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF137333)),
-                    shape = RoundedCornerShape(10.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Filled.SystemUpdate, contentDescription = "Install Apk")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("VERIFY & INSTALL APPLET", fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = {
+                            val file = buildStep.apkFile
+                            val authority = "${context.packageName}.fileprovider"
+                            try {
+                                val uri = FileProvider.getUriForFile(context, authority, file)
+                                val intent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/vnd.android.package-archive"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(intent, "Install / Run Applet APK"))
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Installer: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .height(50.dp)
+                            .testTag("install_compiled_apk_button"),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF137333)),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Filled.SystemUpdate, contentDescription = "Install Apk")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("INSTALL APK", fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = { onExportApk(buildStep.apkFile) },
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .height(50.dp)
+                            .testTag("export_compiled_apk_button"),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        ),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Filled.SaveAlt, contentDescription = "Export Apk")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("EXPORT LOCAL", fontWeight = FontWeight.Bold)
+                    }
                 }
             } else if (buildStep is BuildStep.Failed) {
                 Button(
@@ -991,7 +1078,8 @@ fun LogTerminalLine(line: LogLine) {
 fun BuildHistoryDetailsOverlay(
     build: BuildEntity,
     onClose: () -> Unit,
-    onShareApk: (String) -> Unit
+    onShareApk: (String) -> Unit,
+    onExportApk: (String) -> Unit
 ) {
     val dateString = remember(build.timestamp) {
         val date = Date(build.timestamp)
@@ -1174,18 +1262,40 @@ fun BuildHistoryDetailsOverlay(
 
             // Install button if successful build, otherwise fix tips
             if (build.status == 0 && build.apkPath != null) {
-                Button(
-                    onClick = { onShareApk(build.apkPath) },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF137333)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .testTag("install_archived_apk_button"),
-                    shape = RoundedCornerShape(10.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Filled.SystemUpdate, contentDescription = "Run installer")
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("VERIFY & INSTALL APK ARCHIVE", fontWeight = FontWeight.Bold)
+                    Button(
+                        onClick = { onShareApk(build.apkPath) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF137333)),
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .height(50.dp)
+                            .testTag("install_archived_apk_button"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Filled.SystemUpdate, contentDescription = "Run installer")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("INSTALL APK", fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = { onExportApk(build.apkPath) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        ),
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .height(50.dp)
+                            .testTag("export_archived_apk_button"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Filled.SaveAlt, contentDescription = "Export to storage")
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("EXPORT", fontWeight = FontWeight.Bold)
+                    }
                 }
             } else {
                 Button(
