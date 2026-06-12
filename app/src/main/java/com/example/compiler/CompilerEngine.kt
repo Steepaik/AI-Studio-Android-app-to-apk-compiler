@@ -378,10 +378,11 @@ class CompilerEngine(private val context: Context) {
                         var closeParen = 0
                         
                         lines.forEachIndexed { index, line ->
-                            openCurly += line.count { it == '{' }
-                            closeCurly += line.count { it == '}' }
-                            openParen += line.count { it == '(' }
-                            closeParen += line.count { it == ')' }
+                            val cleanLine = cleanLineForSyntaxCheck(line)
+                            openCurly += cleanLine.count { it == '{' }
+                            closeCurly += cleanLine.count { it == '}' }
+                            openParen += cleanLine.count { it == '(' }
+                            closeParen += cleanLine.count { it == ')' }
 
                             if (line.contains("TODO(") && !line.trim().startsWith("//")) {
                                 warningsList.add("${file.name}:${index + 1} - Contains active TODO placeholder statement")
@@ -646,6 +647,56 @@ class CompilerEngine(private val context: Context) {
             apkPath = outputApkFile.absolutePath
         )
         onComplete(successBuildEntity)
+    }
+
+    private fun cleanLineForSyntaxCheck(line: String): String {
+        val tempLine = line.trim()
+        if (tempLine.startsWith("//") || tempLine.startsWith("*") || tempLine.startsWith("/*") || tempLine.startsWith("*/")) return ""
+
+        // Single-pass scanner to strip string literals, char literals, and single line comments gracefully.
+        val sb = java.lang.StringBuilder()
+        var insideString = false
+        var insideChar = false
+        var escaped = false
+        var i = 0
+
+        while (i < tempLine.length) {
+            val c = tempLine[i]
+
+            if (insideString) {
+                if (escaped) {
+                    escaped = false
+                } else if (c == '\\') {
+                    escaped = true
+                } else if (c == '"') {
+                    insideString = false
+                }
+                // Skip character/comment analysis inside string literals
+            } else if (insideChar) {
+                if (escaped) {
+                    escaped = false
+                } else if (c == '\\') {
+                    escaped = true
+                } else if (c == '\'') {
+                    insideChar = false
+                }
+                // Skip character/comment analysis inside character literals
+            } else {
+                // Outer code scan
+                if (c == '"') {
+                    insideString = true
+                } else if (c == '\'') {
+                    insideChar = true
+                } else if (c == '/' && i + 1 < tempLine.length && tempLine[i + 1] == '/') {
+                    // Line comment started, discard the remainder of this line
+                    break
+                } else {
+                    sb.append(c)
+                }
+            }
+            i++
+        }
+        return sb.toString()
     }
 
     private fun extractZip(inputStream: InputStream, targetDir: File): Int {
