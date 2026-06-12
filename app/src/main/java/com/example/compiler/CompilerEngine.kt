@@ -214,10 +214,10 @@ class CompilerEngine(private val context: Context) {
         addLog("Analyzing project design, structural dependencies & meta components...", LogType.TASK)
         delay(1000)
 
-        // Find metadata.json, AndroidManifest.xml and build.gradle.kts recursively
-        val metadataFile = findFileByName(projectDir, "metadata.json")
-        val manifestFile = findFileByName(projectDir, "AndroidManifest.xml")
-        val gradleFile = findFileByName(projectDir, "build.gradle.kts")
+        // Find metadata.json, AndroidManifest.xml and build.gradle.kts recursively using our robust estimators
+        val metadataFile = findMetadataFile(projectDir)
+        val manifestFile = findMainManifestFile(projectDir)
+        val gradleFile = findModuleGradleFile(projectDir)
 
         var appName = "AI Applet"
         var descText = "An uploaded applet compiled via AI Studio Build compiler."
@@ -225,9 +225,20 @@ class CompilerEngine(private val context: Context) {
         val dependencies = mutableListOf<String>()
         val permissions = mutableListOf<String>()
 
+        addLog("Discovered application architecture layout...", LogType.SUCCESS)
+        if (gradleFile != null) {
+            val relativeGradlePath = gradleFile.absolutePath.substringAfter("extracted_project/")
+            addLog("Located active build module configuration: '$relativeGradlePath'", LogType.INFO)
+        }
+        if (manifestFile != null) {
+            val relativeManifestPath = manifestFile.absolutePath.substringAfter("extracted_project/")
+            addLog("Located active system manifest template: '$relativeManifestPath'", LogType.INFO)
+        }
+
         // 1. Parse metadata.json
         if (metadataFile != null) {
-            addLog("Detected AI Studio metadata.json. Parsing profiles...", LogType.INFO)
+            val relativeMetadataPath = metadataFile.absolutePath.substringAfter("extracted_project/")
+            addLog("Detected AI Studio metadata.json at '$relativeMetadataPath'. Parsing profiles...", LogType.INFO)
             try {
                 val json = JSONObject(metadataFile.readText())
                 val parsedName = json.optString("name", "")
@@ -245,7 +256,7 @@ class CompilerEngine(private val context: Context) {
 
         // 2. Parse Manifest
         if (manifestFile != null) {
-            addLog("Detected AndroidManifest.xml. Resolving target bundle parameters...", LogType.INFO)
+            addLog("Analyzing resolved AndroidManifest.xml. Resolving target bundle parameters...", LogType.INFO)
             try {
                 val text = manifestFile.readText()
                 // Package extraction
@@ -272,27 +283,33 @@ class CompilerEngine(private val context: Context) {
                 addLog("Warning: AndroidManifest parsing encountered structural issue.", LogType.WARNING)
             }
         } else {
-            addLog("Failure: Crucial file AndroidManifest.xml is missing!", LogType.ERROR)
+            addLog("Failure: Crucial file AndroidManifest.xml is missing from the extracted archive!", LogType.ERROR)
             _buildStep.value = BuildStep.Failed(currentLogs)
             return
         }
 
-        // 3. Parse build.gradle.kts for dependencies
+        // 3. Parse build.gradle.kts/build.gradle for dependencies
         if (gradleFile != null) {
-            addLog("Detected build.gradle.kts. Auditing system compilation requirements...", LogType.INFO)
+            addLog("Analyzing module compile dependencies from '${gradleFile.name}'...", LogType.INFO)
             try {
                 val text = gradleFile.readText()
-                val depMatches = Regex("implementation\\((libs\\.[^\\)]+)\\)").findAll(text)
-                depMatches.forEach { match ->
-                    val dep = match.groupValues[1]
+                // Parse all libraries defined using dot-notation (such as libs.androidx.core.ktx)
+                val depMatches = Regex("libs\\.[a-zA-Z0-9_\\.-]+").findAll(text)
+                val resolvedDeps = depMatches.map { it.value }.distinct().toList()
+                resolvedDeps.forEach { dep ->
                     dependencies.add(dep)
                     addLog("External Dependency Resolved: $dep", LogType.VERBOSE)
                 }
+                if (resolvedDeps.isNotEmpty()) {
+                    addLog("Successfully resolved ${resolvedDeps.size} compile-time dependencies.", LogType.SUCCESS)
+                } else {
+                    addLog("No direct Central Catalog (libs.*) dependencies identified in module build file.", LogType.WARNING)
+                }
             } catch (e: Exception) {
-                addLog("Warning: build.gradle.kts dependencies parsing exception.", LogType.WARNING)
+                addLog("Warning: Gradle dependencies parsing exception.", LogType.WARNING)
             }
         } else {
-            addLog("Warning: build.gradle.kts not located. Code analysis might fall back.", LogType.WARNING)
+            addLog("Warning: Active build configuration not located. Code analysis might fall back.", LogType.WARNING)
         }
 
         // 4. File counts & checks
@@ -598,5 +615,55 @@ class CompilerEngine(private val context: Context) {
             }
         }
         return null
+    }
+
+    private fun findMetadataFile(dir: File): File? {
+        if (!dir.exists()) return null
+        return dir.walkTopDown().firstOrNull { it.isFile && it.name == "metadata.json" }
+    }
+
+    private fun findMainManifestFile(dir: File): File? {
+        if (!dir.exists()) return null
+        val candidates = dir.walkTopDown().filter { it.isFile && it.name == "AndroidManifest.xml" }.toList()
+        if (candidates.isEmpty()) return null
+        
+        // Prioritize paths containing "src/main"
+        val mainManifest = candidates.firstOrNull { it.absolutePath.contains("src/main") }
+        if (mainManifest != null) return mainManifest
+        
+        // Next, look for `<application` element
+        val manifestWithApp = candidates.firstOrNull { 
+            try {
+                it.readText().contains("<application")
+            } catch (e: Exception) {
+                false
+            }
+        }
+        if (manifestWithApp != null) return manifestWithApp
+        
+        return candidates.first()
+    }
+
+    private fun findModuleGradleFile(dir: File): File? {
+        if (!dir.exists()) return null
+        val candidates = dir.walkTopDown().filter { it.isFile && (it.name == "build.gradle.kts" || it.name == "build.gradle") }.toList()
+        if (candidates.isEmpty()) return null
+        
+        // Prioritize gradle files that contain android plugin or defaultConfig/applicationId
+        val appGradle = candidates.firstOrNull {
+            try {
+                val text = it.readText()
+                text.contains("com.android.application") || text.contains("applicationId") || text.contains("android {")
+            } catch (e: Exception) {
+                false
+            }
+        }
+        if (appGradle != null) return appGradle
+        
+        // Next, try to look for gradle files inside the "app" folder
+        val appDirGradle = candidates.firstOrNull { it.parentFile?.name == "app" || it.absolutePath.contains("/app/") }
+        if (appDirGradle != null) return appDirGradle
+        
+        return candidates.first()
     }
 }
