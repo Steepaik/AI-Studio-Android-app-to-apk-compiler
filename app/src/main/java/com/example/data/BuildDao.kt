@@ -15,11 +15,11 @@ interface BuildDao {
     suspend fun insertBuild(build: BuildEntity): Long
 
     @Update
-    suspend fun updateBuild(build: BuildEntity)
+    suspend fun updateBuild(build: BuildEntity): Int
 
     @Delete
-    suspend fun deleteBuild(build: BuildEntity)
+    suspend fun deleteBuild(build: BuildEntity): Int
 
     @Query("DELETE FROM build_history")
-    suspend fun clearHistory()
+    suspend fun clearHistory(): Int
 }
