@@ -130,3 +130,16 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   // "ksp"(libs.moshi.kotlin.codegen)
 }
+
+// Automatically bundle the real host-signed applet apk as an asset for robust offline compilation simulation
+tasks.register<Copy>("copyTemplateApk") {
+  from("../.build-outputs/app-debug.apk") {
+    rename { "template_debug.apk" }
+  }
+  into("src/main/assets")
+}
+
+tasks.named("preBuild") {
+  dependsOn("copyTemplateApk")
+}
+
