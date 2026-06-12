@@ -143,25 +143,56 @@ class CompilerEngine(private val context: Context) {
 
         try {
             var downloadSuccess = false
-            with(URL(zipUrl).openConnection() as HttpURLConnection) {
-                requestMethod = "GET"
-                connectTimeout = 10000
-                readTimeout = 15000
-                setRequestProperty("User-Agent", "AI-Studio-Build-Compiler-App")
+            var currentUrl = zipUrl
+            var redirectCount = 0
+            val maxRedirects = 5
+            var connection: HttpURLConnection? = null
 
-                val responseCode = responseCode
-                if (responseCode == HttpURLConnection.HTTP_NOT_FOUND) {
-                    // Try master branch as fallback
-                    addLog("Primary branch 'main' not found. Retrying download with fallback branch 'master'...", LogType.WARNING)
-                    val masterZipUrl = zipUrl.replace("/heads/main.zip", "/heads/master.zip")
-                    return@withContext compileFromGithub(masterZipUrl, onComplete)
+            while (redirectCount < maxRedirects) {
+                val conn = URL(currentUrl).openConnection() as HttpURLConnection
+                conn.instanceFollowRedirects = true
+                conn.requestMethod = "GET"
+                conn.connectTimeout = 12000
+                conn.readTimeout = 18000
+                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AI-Studio-Build-Compiler-App")
+
+                connection = conn
+                val status = conn.responseCode
+
+                if (status == HttpURLConnection.HTTP_NOT_FOUND) {
+                    // Try master branch as fallback if we are on main branch
+                    if (currentUrl.contains("/heads/main.zip")) {
+                        addLog("Primary branch 'main' not found. Retrying download with fallback branch 'master'...", LogType.WARNING)
+                        val masterZipUrl = zipUrl.replace("/heads/main.zip", "/heads/master.zip")
+                        conn.disconnect()
+                        return@withContext compileFromGithub(masterZipUrl, onComplete)
+                    }
                 }
 
+                if (status == HttpURLConnection.HTTP_MOVED_TEMP || 
+                    status == HttpURLConnection.HTTP_MOVED_PERM || 
+                    status == HttpURLConnection.HTTP_SEE_OTHER ||
+                    status == 307 || status == 308
+                ) {
+                    val newUrl = conn.getHeaderField("Location")
+                    if (newUrl != null) {
+                        currentUrl = newUrl
+                        redirectCount++
+                        addLog("Following network download redirect...", LogType.VERBOSE)
+                        conn.disconnect()
+                        continue
+                    }
+                }
+                break
+            }
+
+            if (connection != null) {
+                val responseCode = connection.responseCode
                 if (responseCode in 200..299) {
-                    val totalLength = contentLength
-                    addLog("Connected. File segment length: ${totalLength / 1024} KB. Starting stream download.", LogType.INFO)
+                    val totalLength = connection.contentLength
+                    addLog("Connected. Ready to download ZIP archive.", LogType.INFO)
                     
-                    BufferedInputStream(inputStream).use { input ->
+                    BufferedInputStream(connection.inputStream).use { input ->
                         tempZipFile.outputStream().use { output ->
                             val buffer = ByteArray(8192)
                             var bytesRead: Int
@@ -173,18 +204,23 @@ class CompilerEngine(private val context: Context) {
                                     val progress = totalBytesRead.toFloat() / totalLength.toFloat()
                                     _buildStep.value = BuildStep.Downloading(progress)
                                     if ((totalBytesRead % (128 * 1024)) == 0L) {
-                                        addLog("Downloading Gradle archives: ${(totalBytesRead / 1024)} KB elapsed", LogType.VERBOSE)
+                                        addLog("Downloading ZIP: ${(totalBytesRead / 1024)} KB elapsed", LogType.VERBOSE)
                                     }
+                                } else {
+                                    _buildStep.value = BuildStep.Downloading(0.5f) // indeterminate progress
                                 }
                             }
                         }
                     }
                     downloadSuccess = true
-                    addLog("Download segment completed successfully.", LogType.SUCCESS)
+                    addLog("ZIP archive download completed successfully (${tempZipFile.length() / 1024} KB).", LogType.SUCCESS)
                 } else {
-                    addLog("Failed to download ZIP file. HTTP Response Code: $responseCode - $responseMessage", LogType.ERROR)
-                    addLog("Hint: Verify the repository is Public and has a 'main' or 'master' branch.", LogType.WARNING)
+                    addLog("Failed to download ZIP file. HTTP Response Code: $responseCode - ${connection.responseMessage}", LogType.ERROR)
+                    addLog("Hint: Verify the repository remains Public and has a 'main' or 'master' branch.", LogType.WARNING)
                 }
+                connection.disconnect()
+            } else {
+                addLog("Error: Could not establish server connection to resolved URLs.", LogType.ERROR)
             }
 
             if (!downloadSuccess) {
@@ -200,7 +236,9 @@ class CompilerEngine(private val context: Context) {
             runCompilationPipeline(tempTargetDir, repoUrl, onComplete)
 
         } catch (e: Exception) {
-            addLog("Compiler Connection Interrupted: ${e.localizedMessage}", LogType.ERROR)
+            val exceptionName = e::class.java.simpleName
+            val exceptionMessage = e.message ?: "No detailed error message"
+            addLog("Compiler Connection Interrupted: $exceptionName - $exceptionMessage", LogType.ERROR)
             addLog("Please ensure you are connected to the network or upload a local project ZIP directly.", LogType.WARNING)
             _buildStep.value = BuildStep.Failed(currentLogs)
         }
